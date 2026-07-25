@@ -367,6 +367,23 @@ class Telephone(
         reconfigureTransmitPipeline()
     }
 
+/**
+     * LCS: change only THIS side's transmit codec — the peer is NOT signalled.
+     * Mirrors the inbound switchProfileFromRemote path; the peer's receiver
+     * auto-detects the new codec from each packet header, so PREFERRED_PROFILE
+     * is deliberately not sent.
+     */
+    fun switchTransmitProfile(profile: Profile) {
+        if (activeProfile == profile) return
+        if (callStatus != Signalling.STATUS_ESTABLISHED) {
+            Log.w(TAG, "Cannot switch transmit profile: call not established (status=$callStatus)")
+            return
+        }
+        Log.i(TAG, "Switching transmit profile ${activeProfile.abbreviation} -> ${profile.abbreviation} (local only)")
+        activeProfile = profile
+        reconfigureTransmitPipeline()
+    }
+
     /**
      * Mute or unmute transmit (microphone).
      *
