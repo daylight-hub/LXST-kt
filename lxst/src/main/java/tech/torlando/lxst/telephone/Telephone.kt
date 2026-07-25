@@ -344,7 +344,7 @@ class Telephone(
      *
      * @param profile New profile to switch to
      */
-fun switchProfile(profile: Profile) {
+    fun switchProfile(profile: Profile) {
         if (activeProfile == profile) {
             Log.d(TAG, "Already using profile ${profile.abbreviation}, ignoring")
             return
