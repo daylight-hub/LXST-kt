@@ -344,7 +344,7 @@ class Telephone(
      *
      * @param profile New profile to switch to
      */
-    fun switchProfile(profile: Profile) {
+fun switchProfile(profile: Profile) {
         if (activeProfile == profile) {
             Log.d(TAG, "Already using profile ${profile.abbreviation}, ignoring")
             return
@@ -359,29 +359,43 @@ class Telephone(
 
         activeProfile = profile
 
-        // Signal profile change to remote
+        // Signal profile change to remote so its decoder reconfigures too.
         val profileSignal = Signalling.PREFERRED_PROFILE + profile.id
         networkTransport.sendSignal(profileSignal)
 
-        // Reconfigure transmit pipeline with new codec
+        // Reconfigure OUR transmit pipeline with the new codec.
         reconfigureTransmitPipeline()
-    }
 
-/**
-     * LCS: change only THIS side's transmit codec — the peer is NOT signalled.
-     * Mirrors the inbound switchProfileFromRemote path; the peer's receiver
-     * auto-detects the new codec from each packet header, so PREFERRED_PROFILE
-     * is deliberately not sent.
-     */
-    fun switchTransmitProfile(profile: Profile) {
-        if (activeProfile == profile) return
-        if (callStatus != Signalling.STATUS_ESTABLISHED) {
-            Log.w(TAG, "Cannot switch transmit profile: call not established (status=$callStatus)")
-            return
+        // Reconfigure OUR receive decoder + audio output. This block is the
+        // fix: stock switchProfile() omitted it, so a local switch left our
+        // decoder pinned to the old codec and killed inbound audio. Identical
+        // to switchProfileFromRemote()'s decoder handling.
+        if (useNativeCodec && useNativePlayback) {
+            val decodeParams = profile.nativeDecodeParams()
+            NativePlaybackEngine.destroyDecoder()
+            NativePlaybackEngine.configureDecoder(
+                codecType = decodeParams.codecType,
+                sampleRate = decodeParams.sampleRate,
+                channels = decodeParams.channels,
+                opusApp = decodeParams.opusApplication,
+                opusBitrate = decodeParams.opusBitrate,
+                opusComplexity = decodeParams.opusComplexity,
+                codec2Mode = decodeParams.codec2LibraryMode,
+            )
+            audioOutput?.let { sink ->
+                if (sink.isRunning()) sink.stop()
+                configureAudioOutput(decodeParams.sampleRate, decodeParams.channels)
+            }
+        } else {
+            val decodeCodec = profile.createDecodeCodec()
+            val decodeRate = decodeCodec.preferredSamplerate ?: 48000
+            linkSource?.codec = decodeCodec
+            linkSource?.sampleRate = decodeRate
+            audioOutput?.let { sink ->
+                if (sink.isRunning()) sink.stop()
+                configureAudioOutput(decodeRate, 1)
+            }
         }
-        Log.i(TAG, "Switching transmit profile ${activeProfile.abbreviation} -> ${profile.abbreviation} (local only)")
-        activeProfile = profile
-        reconfigureTransmitPipeline()
     }
 
     /**
