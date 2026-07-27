@@ -386,6 +386,7 @@ class Telephone(
                 if (sink.isRunning()) sink.stop()
                 configureAudioOutput(decodeParams.sampleRate, decodeParams.channels)
             }
+            linkSource?.rearmPlaybackStart()
         } else {
             val decodeCodec = profile.createDecodeCodec()
             val decodeRate = decodeCodec.preferredSamplerate ?: 48000
@@ -1267,6 +1268,7 @@ class Telephone(
                 if (sink.isRunning()) sink.stop()
                 configureAudioOutput(decodeParams.sampleRate, decodeParams.channels)
             }
+            linkSource?.rearmPlaybackStart()
         } else {
             // Phase 2: Update Kotlin decoder
             val decodeCodec = profile.createDecodeCodec()

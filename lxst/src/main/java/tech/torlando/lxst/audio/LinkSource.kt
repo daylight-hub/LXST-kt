@@ -263,6 +263,19 @@ class LinkSource(
     override fun stop() {
         shouldRun.set(false)
         playbackStarted.set(false)
+    }
+
+    /**
+     * LCS: re-arm playback auto-start after a mid-call codec switch.
+     *
+     * The reconfigure path stops the native playback stream, but playbackStarted
+     * stays true from the initial call setup, so the auto-start guard in
+     * processPacket() never re-fires and audio stays dead until teardown.
+     * Clearing the flag lets playback restart once the new-codec prebuffer
+     * accumulates. Fix for "every codec switch kills audio".
+     */
+    fun rearmPlaybackStart() {
+        playbackStarted.set(false)
         synchronized(receiveLock) {
             packetQueue.clear()
         }
