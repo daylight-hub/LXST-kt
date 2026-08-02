@@ -4,8 +4,10 @@
 
 package tech.torlando.lxst.audio
 
+import io.mockk.mockk
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import tech.torlando.lxst.core.PacketRouter
 
 class LinkSourcePrebufferTest {
     @Test
@@ -20,8 +22,43 @@ class LinkSourcePrebufferTest {
     }
 
     @Test
+    fun `VLBW and LBW native playback start after one packet`() {
+        assertEquals(1, LinkSource.computePrebufferFrames(frameTimeMs = 320))
+        assertEquals(1, LinkSource.computePrebufferFrames(frameTimeMs = 200))
+    }
+
+    @Test
     fun `short native profiles retain their existing prebuffer targets`() {
         assertEquals(7, LinkSource.computePrebufferFrames(frameTimeMs = 60))
         assertEquals(45, LinkSource.computePrebufferFrames(frameTimeMs = 10))
+    }
+
+    @Test
+    fun `native profile switch refreshes cached and engine prebuffer`() {
+        val source = LinkSource(bridge = mockk<PacketRouter>(relaxed = true))
+        source.prebufferFrames = 1
+        var configuredPrebuffer = -1
+
+        val updated = source.refreshNativePrebuffer(frameTimeMs = 60) { prebufferFrames ->
+            configuredPrebuffer = prebufferFrames
+            true
+        }
+
+        assertEquals(true, updated)
+        assertEquals(7, source.prebufferFrames)
+        assertEquals(7, configuredPrebuffer)
+        source.shutdown()
+    }
+
+    @Test
+    fun `failed native prebuffer update does not publish cached threshold`() {
+        val source = LinkSource(bridge = mockk<PacketRouter>(relaxed = true))
+        source.prebufferFrames = 1
+
+        val updated = source.refreshNativePrebuffer(frameTimeMs = 60) { false }
+
+        assertEquals(false, updated)
+        assertEquals(1, source.prebufferFrames)
+        source.shutdown()
     }
 }

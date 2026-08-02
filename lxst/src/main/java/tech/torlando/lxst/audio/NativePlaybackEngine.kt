@@ -101,6 +101,12 @@ object NativePlaybackEngine {
     /** True if the Oboe stream is open and playing. */
     fun isPlaying(): Boolean = nativeIsPlaying()
 
+    /** Update the prebuffer threshold without replacing the native engine. */
+    fun setPrebufferFrames(prebufferFrames: Int): Boolean {
+        ensureLoaded()
+        return nativeSetPrebufferFrames(prebufferFrames)
+    }
+
     /** Cumulative underrun (xrun) count from the Oboe stream. */
     fun getXRunCount(): Int = nativeGetXRunCount()
 
@@ -202,6 +208,8 @@ object NativePlaybackEngine {
     private external fun nativeGetBufferedFrameCount(): Int
 
     private external fun nativeIsPlaying(): Boolean
+
+    private external fun nativeSetPrebufferFrames(prebufferFrames: Int): Boolean
 
     private external fun nativeGetXRunCount(): Int
 

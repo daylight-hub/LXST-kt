@@ -95,6 +95,9 @@ public:
     /** True if the Oboe stream is open and playing. */
     bool isPlaying() const { return isPlaying_.load(std::memory_order_relaxed); }
 
+    /** Update the restart/drain prebuffer threshold atomically. */
+    bool setPrebufferFrames(int prebufferFrames);
+
     /** Cumulative underrun (xrun) count from the Oboe stream. */
     int getXRunCount() const;
 
@@ -184,7 +187,7 @@ private:
     int sampleRate_ = 0;
     int channels_ = 0;
     int frameSamples_ = 0;     // Samples per LXST frame
-    int prebufferFrames_ = 0;
+    std::atomic<int> prebufferFrames_{0};
 
     std::unique_ptr<PacketRingBuffer> ringBuffer_;
     std::shared_ptr<oboe::AudioStream> stream_;

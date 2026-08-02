@@ -67,7 +67,7 @@ class LineSink(
             require(frameTimeMs > 0) { "frameTimeMs must be positive" }
             require(maxFrames > 0) { "maxFrames must be positive" }
             val autostartFrames =
-                if (frameTimeMs == 400L) {
+                if (Codec2PlaybackPolicy.usesSinglePacketBuffer(frameTimeMs)) {
                     1
                 } else {
                     (PREBUFFER_MS / frameTimeMs)

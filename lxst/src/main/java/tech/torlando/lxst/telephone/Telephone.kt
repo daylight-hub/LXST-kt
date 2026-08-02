@@ -1221,15 +1221,27 @@ class Telephone(
             // Phase 3: Reconfigure native decoder for new profile
             val decodeParams = profile.nativeDecodeParams()
             NativePlaybackEngine.destroyDecoder()
-            NativePlaybackEngine.configureDecoder(
-                codecType = decodeParams.codecType,
-                sampleRate = decodeParams.sampleRate,
-                channels = decodeParams.channels,
-                opusApp = decodeParams.opusApplication,
-                opusBitrate = decodeParams.opusBitrate,
-                opusComplexity = decodeParams.opusComplexity,
-                codec2Mode = decodeParams.codec2LibraryMode,
-            )
+            val decoderConfigured =
+                NativePlaybackEngine.configureDecoder(
+                    codecType = decodeParams.codecType,
+                    sampleRate = decodeParams.sampleRate,
+                    channels = decodeParams.channels,
+                    opusApp = decodeParams.opusApplication,
+                    opusBitrate = decodeParams.opusBitrate,
+                    opusComplexity = decodeParams.opusComplexity,
+                    codec2Mode = decodeParams.codec2LibraryMode,
+                )
+            if (!decoderConfigured) {
+                Log.e(TAG, "Failed to configure native decoder for ${profile.abbreviation}")
+            } else {
+                val prebufferUpdated =
+                    linkSource?.refreshNativePrebuffer(profile.frameTimeMs) { prebufferFrames ->
+                        NativePlaybackEngine.setPrebufferFrames(prebufferFrames)
+                    } ?: false
+                if (!prebufferUpdated) {
+                    Log.w(TAG, "Failed to refresh native prebuffer for ${profile.abbreviation}")
+                }
+            }
 
             // Reconfigure audio output for new decode rate
             audioOutput?.let { sink ->

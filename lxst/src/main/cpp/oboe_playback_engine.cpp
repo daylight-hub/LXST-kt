@@ -28,7 +28,7 @@ bool OboePlaybackEngine::create(int sampleRate, int channels, int frameSamples,
     sampleRate_ = sampleRate;
     channels_ = channels;
     frameSamples_ = frameSamples;
-    prebufferFrames_ = prebufferFrames;
+    prebufferFrames_.store(prebufferFrames, std::memory_order_relaxed);
 
     ringBuffer_ = std::make_unique<PacketRingBuffer>(maxBufferFrames, frameSamples);
     callbackBuffer_ = std::make_unique<int16_t[]>(frameSamples);
@@ -106,6 +106,15 @@ void OboePlaybackEngine::destroy() {
 
 int OboePlaybackEngine::getBufferedFrameCount() const {
     return ringBuffer_ ? ringBuffer_->availableFrames() : 0;
+}
+
+bool OboePlaybackEngine::setPrebufferFrames(int prebufferFrames) {
+    if (prebufferFrames < 1 || !isCreated_.load(std::memory_order_acquire)) {
+        return false;
+    }
+    prebufferFrames_.store(prebufferFrames, std::memory_order_release);
+    LOGI("Updated prebuffer threshold: %d frames", prebufferFrames);
+    return true;
 }
 
 int OboePlaybackEngine::getXRunCount() const {
@@ -202,8 +211,9 @@ bool OboePlaybackEngine::restartStream() {
     // prebuffer level so the new stream starts near real-time.
     if (ringBuffer_) {
         int before = ringBuffer_->availableFrames();
-        if (before > prebufferFrames_) {
-            ringBuffer_->drain(prebufferFrames_);
+        int prebufferFrames = prebufferFrames_.load(std::memory_order_acquire);
+        if (before > prebufferFrames) {
+            ringBuffer_->drain(prebufferFrames);
             LOGI("Drained buffer: %d -> %d frames", before, ringBuffer_->availableFrames());
         }
     }
