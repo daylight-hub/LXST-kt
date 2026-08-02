@@ -4,8 +4,10 @@
 
 package tech.torlando.lxst.audio
 
+import io.mockk.mockk
 import org.junit.Assert.assertEquals
 import org.junit.Test
+import tech.torlando.lxst.core.PacketRouter
 
 class LinkSourcePrebufferTest {
     @Test
@@ -29,5 +31,20 @@ class LinkSourcePrebufferTest {
     fun `short native profiles retain their existing prebuffer targets`() {
         assertEquals(7, LinkSource.computePrebufferFrames(frameTimeMs = 60))
         assertEquals(45, LinkSource.computePrebufferFrames(frameTimeMs = 10))
+    }
+
+    @Test
+    fun `native profile reconfiguration refreshes cached prebuffer`() {
+        val source = LinkSource(bridge = mockk<PacketRouter>(relaxed = true))
+        source.prebufferFrames = 1
+        var configuredPrebuffer = -1
+
+        source.reconfigureNativePlayback(frameTimeMs = 60) { prebufferFrames ->
+            configuredPrebuffer = prebufferFrames
+        }
+
+        assertEquals(7, source.prebufferFrames)
+        assertEquals(7, configuredPrebuffer)
+        source.shutdown()
     }
 }

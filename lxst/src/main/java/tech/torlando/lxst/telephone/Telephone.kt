@@ -1218,18 +1218,30 @@ class Telephone(
         reconfigureTransmitPipeline()
 
         if (useNativeCodec && useNativePlayback) {
-            // Phase 3: Reconfigure native decoder for new profile
+            // Phase 3: Recreate native playback geometry and decoder for the new profile.
+            // The ring buffer frame size and prebuffer threshold are fixed at engine
+            // creation, so configureDecoder() alone is insufficient.
             val decodeParams = profile.nativeDecodeParams()
-            NativePlaybackEngine.destroyDecoder()
-            NativePlaybackEngine.configureDecoder(
-                codecType = decodeParams.codecType,
-                sampleRate = decodeParams.sampleRate,
-                channels = decodeParams.channels,
-                opusApp = decodeParams.opusApplication,
-                opusBitrate = decodeParams.opusBitrate,
-                opusComplexity = decodeParams.opusComplexity,
-                codec2Mode = decodeParams.codec2LibraryMode,
-            )
+            val decodedFrameSamples =
+                decodeParams.sampleRate * profile.frameTimeMs / 1000 * decodeParams.channels
+            linkSource?.reconfigureNativePlayback(profile.frameTimeMs) { prebufferFrames ->
+                NativePlaybackEngine.create(
+                    sampleRate = decodeParams.sampleRate,
+                    channels = decodeParams.channels,
+                    frameSamples = decodedFrameSamples,
+                    maxBufferFrames = OboeLineSink.MAX_QUEUE_SLOTS,
+                    prebufferFrames = prebufferFrames,
+                )
+                NativePlaybackEngine.configureDecoder(
+                    codecType = decodeParams.codecType,
+                    sampleRate = decodeParams.sampleRate,
+                    channels = decodeParams.channels,
+                    opusApp = decodeParams.opusApplication,
+                    opusBitrate = decodeParams.opusBitrate,
+                    opusComplexity = decodeParams.opusComplexity,
+                    codec2Mode = decodeParams.codec2LibraryMode,
+                )
+            }
 
             // Reconfigure audio output for new decode rate
             audioOutput?.let { sink ->

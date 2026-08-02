@@ -11,6 +11,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import tech.torlando.lxst.core.AudioDevice
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /**
  * Tests for LineSink's buffering, underrun recovery, and re-buffer behavior.
@@ -105,10 +107,21 @@ class LineSinkPacingTest {
         val sink = LineSink(mockBridge, autodigest = true, lowLatency = false)
         sink.configure(SAMPLE_RATE_16K, MONO_CHANNELS)
         val prebufferFrames = effectiveAutostartMin(FRAME_SIZE_10MS_16K, SAMPLE_RATE_16K)
+        val playbackInitEntered = CountDownLatch(1)
+        val finishPlaybackInit = CountDownLatch(1)
+        every { mockBridge.startPlayback(any(), any(), any(), any()) } answers {
+            playbackInitEntered.countDown()
+            finishPlaybackInit.await(1, TimeUnit.SECONDS)
+        }
 
-        repeat(prebufferFrames + 5) {
+        repeat(prebufferFrames) {
             sink.handleFrame(FloatArray(FRAME_SIZE_10MS_16K))
         }
+        assertTrue("Playback initialization should begin", playbackInitEntered.await(1, TimeUnit.SECONDS))
+        repeat(5) {
+            sink.handleFrame(FloatArray(FRAME_SIZE_10MS_16K))
+        }
+        finishPlaybackInit.countDown()
         Thread.sleep(300)
 
         sink.stop()

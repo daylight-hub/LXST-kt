@@ -134,6 +134,7 @@ class LinkSource(
     private val playbackStarted = AtomicBoolean(false)
     private val packetQueue = ArrayDeque<ByteArray>(MAX_PACKETS)
     private val receiveLock = Any()
+    private val nativePlaybackLock = Any()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     init {
@@ -193,25 +194,29 @@ class LinkSource(
         }
 
         if (useNativeCodec) {
-            // Phase 3: Send encoded data directly to native playback engine.
-            // Skip header byte via offset parameter (no copyOfRange allocation).
-            try {
-                NativePlaybackEngine.writeEncodedPacket(data, 1, data.size - 1)
+            // Serialize packet writes with profile reconfiguration so the JNI
+            // engine cannot be replaced while a packet is being decoded.
+            synchronized(nativePlaybackLock) {
+                // Phase 3: Send encoded data directly to native playback engine.
+                // Skip header byte via offset parameter (no copyOfRange allocation).
+                try {
+                    NativePlaybackEngine.writeEncodedPacket(data, 1, data.size - 1)
 
-                // Auto-start playback stream once prebuffer has accumulated.
-                // Mirrors Phase 2's OboeLineSink pattern: defer startStream() until
-                // the ring buffer has enough data to prevent callback starvation.
-                if (deferPlaybackStart && !playbackStarted.get()) {
-                    val buffered = NativePlaybackEngine.getBufferedFrameCount()
-                    if (buffered >= prebufferFrames) {
-                        if (playbackStarted.compareAndSet(false, true)) {
-                            val started = NativePlaybackEngine.startStream()
-                            Log.i(TAG, "Auto-started native playback: prebuf=$buffered/$prebufferFrames, ok=$started")
+                    // Auto-start playback stream once prebuffer has accumulated.
+                    // Mirrors Phase 2's OboeLineSink pattern: defer startStream() until
+                    // the ring buffer has enough data to prevent callback starvation.
+                    if (deferPlaybackStart && !playbackStarted.get()) {
+                        val buffered = NativePlaybackEngine.getBufferedFrameCount()
+                        if (buffered >= prebufferFrames) {
+                            if (playbackStarted.compareAndSet(false, true)) {
+                                val started = NativePlaybackEngine.startStream()
+                                Log.i(TAG, "Auto-started native playback: prebuf=$buffered/$prebufferFrames, ok=$started")
+                            }
                         }
                     }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Native decode error, dropping frame: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Native decode error, dropping frame: ${e.message}")
             }
         } else {
             // Phase 2: Kotlin codec decode → float32 → Mixer → sink
@@ -249,6 +254,28 @@ class LinkSource(
             } else {
                 delay(2) // Brief sleep when queue empty
             }
+        }
+    }
+
+    /**
+     * Reconfigure the direct-native playback engine for a profile change.
+     *
+     * Native playback geometry is fixed when the engine is created, so decoder,
+     * ring-buffer frame size, and prebuffer threshold must change atomically.
+     * Stale encoded packets from the previous profile are discarded.
+     */
+    internal fun reconfigureNativePlayback(
+        frameTimeMs: Int,
+        configureEngine: (prebufferFrames: Int) -> Unit,
+    ) {
+        val updatedPrebufferFrames = computePrebufferFrames(frameTimeMs)
+        synchronized(nativePlaybackLock) {
+            synchronized(receiveLock) {
+                packetQueue.clear()
+            }
+            playbackStarted.set(false)
+            configureEngine(updatedPrebufferFrames)
+            prebufferFrames = updatedPrebufferFrames
         }
     }
 
