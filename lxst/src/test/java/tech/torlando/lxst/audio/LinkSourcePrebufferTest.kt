@@ -20,6 +20,12 @@ class LinkSourcePrebufferTest {
     }
 
     @Test
+    fun `VLBW and LBW native playback start after one packet`() {
+        assertEquals(1, LinkSource.computePrebufferFrames(frameTimeMs = 320))
+        assertEquals(1, LinkSource.computePrebufferFrames(frameTimeMs = 200))
+    }
+
+    @Test
     fun `short native profiles retain their existing prebuffer targets`() {
         assertEquals(7, LinkSource.computePrebufferFrames(frameTimeMs = 60))
         assertEquals(45, LinkSource.computePrebufferFrames(frameTimeMs = 10))

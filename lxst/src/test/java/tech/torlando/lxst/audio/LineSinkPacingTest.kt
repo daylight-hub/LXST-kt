@@ -44,9 +44,10 @@ class LineSinkPacingTest {
     }
 
     @Test
-    fun `long non-ULBW profiles retain the five-frame floor`() {
-        assertEquals(LineSink.BufferTargets(5, 5), LineSink.bufferTargetsForFrameTime(320L, 4))
-        assertEquals(LineSink.BufferTargets(5, 5), LineSink.bufferTargetsForFrameTime(200L, 7))
+    fun `Codec2 startup and rebuffer targets are one packet`() {
+        assertEquals(LineSink.BufferTargets(1, 1), LineSink.bufferTargetsForFrameTime(400L, 15))
+        assertEquals(LineSink.BufferTargets(1, 1), LineSink.bufferTargetsForFrameTime(320L, 15))
+        assertEquals(LineSink.BufferTargets(1, 1), LineSink.bufferTargetsForFrameTime(200L, 15))
     }
 
     @Test
@@ -65,6 +66,20 @@ class LineSinkPacingTest {
         assertTrue("ULBW should not wait for a five-packet two-second floor", sink.isRunning())
         sink.stop()
         sink.release()
+    }
+
+    @Test
+    fun `VLBW and LBW playback autostart after one packet`() {
+        for (samplesPerPacket in listOf(2_560, 1_600)) {
+            val sink = LineSink(mockBridge, autodigest = true, lowLatency = false)
+            sink.configure(sampleRate = 8_000, channels = MONO_CHANNELS)
+
+            sink.handleFrame(FloatArray(samplesPerPacket))
+
+            assertTrue("Codec2 playback should start after one decoded packet", sink.isRunning())
+            sink.stop()
+            sink.release()
+        }
     }
 
     @Test

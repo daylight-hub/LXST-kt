@@ -66,16 +66,16 @@ class LinkSource(
         /**
          * Compute the prebuffer frame count for a given profile frame time.
          *
-         * Returns at least [MIN_PREBUFFER_FRAMES] frames, targeting
-         * [PREBUFFER_TARGET_MS] of buffered audio. For profiles with large
-         * frames (MQ: 60ms → 5 frames = 300ms) this matches the old fixed
-         * value. For low-latency profiles (ULL: 10ms → 30 frames = 300ms)
-         * this provides adequate jitter absorption.
+         * Returns one packet for the canonical Codec2 ULBW, VLBW, and LBW
+         * durations, matching Python LXST. Other profiles target
+         * [PREBUFFER_TARGET_MS] while retaining at least [MIN_PREBUFFER_FRAMES]
+         * of jitter protection.
          */
         fun computePrebufferFrames(frameTimeMs: Int): Int =
-            if (frameTimeMs == 400) {
-                // ULBW packets already contain 400 ms of audio. Retaining the generic
-                // five-frame floor adds a deterministic two-second playback delay.
+            if (Codec2PlaybackPolicy.usesSinglePacketBuffer(frameTimeMs.toLong())) {
+                // Python LXST starts ULBW, VLBW, and LBW playback after one
+                // decoded packet. Their packet durations already provide
+                // 400 ms, 320 ms, and 200 ms of buffered audio respectively.
                 1
             } else {
                 maxOf(MIN_PREBUFFER_FRAMES, PREBUFFER_TARGET_MS / frameTimeMs)
