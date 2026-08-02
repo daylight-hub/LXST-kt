@@ -72,7 +72,14 @@ class LinkSource(
          * value. For low-latency profiles (ULL: 10ms → 30 frames = 300ms)
          * this provides adequate jitter absorption.
          */
-        fun computePrebufferFrames(frameTimeMs: Int): Int = maxOf(MIN_PREBUFFER_FRAMES, PREBUFFER_TARGET_MS / frameTimeMs)
+        fun computePrebufferFrames(frameTimeMs: Int): Int =
+            if (frameTimeMs == 400) {
+                // ULBW packets already contain 400 ms of audio. Retaining the generic
+                // five-frame floor adds a deterministic two-second playback delay.
+                1
+            } else {
+                maxOf(MIN_PREBUFFER_FRAMES, PREBUFFER_TARGET_MS / frameTimeMs)
+            }
     }
 
     // RemoteSource properties
