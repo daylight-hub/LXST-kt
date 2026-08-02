@@ -18,4 +18,10 @@ class LinkSourcePrebufferTest {
             prebufferFrames,
         )
     }
+
+    @Test
+    fun `short native profiles retain their existing prebuffer targets`() {
+        assertEquals(7, LinkSource.computePrebufferFrames(frameTimeMs = 60))
+        assertEquals(45, LinkSource.computePrebufferFrames(frameTimeMs = 10))
+    }
 }
