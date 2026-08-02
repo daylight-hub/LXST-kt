@@ -67,9 +67,16 @@ class LineSink(
             require(frameTimeMs > 0) { "frameTimeMs must be positive" }
             require(maxFrames > 0) { "maxFrames must be positive" }
             val autostartFrames =
-                (PREBUFFER_MS / frameTimeMs)
-                    .toInt()
-                    .coerceIn(1, (maxFrames / 2).coerceAtLeast(1))
+                if (frameTimeMs == 400L) {
+                    1
+                } else {
+                    (PREBUFFER_MS / frameTimeMs)
+                        .toInt()
+                        .coerceIn(
+                            AUTOSTART_MIN,
+                            (maxFrames / 2).coerceAtLeast(AUTOSTART_MIN),
+                        )
+                }
             return BufferTargets(
                 autostartFrames = autostartFrames,
                 rebufferFrames = REBUFFER_FRAMES.coerceAtMost(autostartFrames),

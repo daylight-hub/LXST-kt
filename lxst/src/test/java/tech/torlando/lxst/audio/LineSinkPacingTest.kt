@@ -44,6 +44,12 @@ class LineSinkPacingTest {
     }
 
     @Test
+    fun `long non-ULBW profiles retain the five-frame floor`() {
+        assertEquals(LineSink.BufferTargets(5, 5), LineSink.bufferTargetsForFrameTime(320L, 4))
+        assertEquals(LineSink.BufferTargets(5, 5), LineSink.bufferTargetsForFrameTime(200L, 7))
+    }
+
+    @Test
     fun `short profiles retain existing buffering targets`() {
         assertEquals(LineSink.BufferTargets(8, 5), LineSink.bufferTargetsForFrameTime(60L, 25))
         assertEquals(LineSink.BufferTargets(50, 5), LineSink.bufferTargetsForFrameTime(10L, 150))
