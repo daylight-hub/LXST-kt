@@ -34,6 +34,11 @@ class LineSink(
     private val autodigest: Boolean = true,
     private val lowLatency: Boolean = false,
 ) : LocalSink() {
+    data class BufferTargets(
+        val autostartFrames: Int,
+        val rebufferFrames: Int,
+    )
+
     companion object {
         private const val TAG = "Columba:LineSink"
 
@@ -54,6 +59,22 @@ class LineSink(
         // Effective limits are recomputed from frame time in updateBufferLimits().
         const val MAX_FRAMES = 15
         const val AUTOSTART_MIN = 5
+
+        internal fun bufferTargetsForFrameTime(
+            frameTimeMs: Long,
+            maxFrames: Int,
+        ): BufferTargets {
+            require(frameTimeMs > 0) { "frameTimeMs must be positive" }
+            require(maxFrames > 0) { "maxFrames must be positive" }
+            val autostartFrames =
+                (PREBUFFER_MS / frameTimeMs)
+                    .toInt()
+                    .coerceIn(1, (maxFrames / 2).coerceAtLeast(1))
+            return BufferTargets(
+                autostartFrames = autostartFrames,
+                rebufferFrames = REBUFFER_FRAMES.coerceAtMost(autostartFrames),
+            )
+        }
     }
 
     // Frame queue — generous physical capacity; effective limits enforce real depth.
@@ -64,6 +85,8 @@ class LineSink(
     @Volatile private var effectiveMaxFrames: Int = MAX_FRAMES
 
     @Volatile private var effectiveAutostartMin: Int = AUTOSTART_MIN
+
+    @Volatile private var effectiveRebufferFrames: Int = REBUFFER_FRAMES
 
     @Volatile private var bufferLimitsInitialized: Boolean = false
 
@@ -265,7 +288,7 @@ class LineSink(
             // REBUFFER_FRAMES before resuming. Only triggers for prolonged outages — brief
             // jitter gaps are absorbed by the AudioTrack's internal buffer.
             if (needsRebuffer) {
-                if (frameQueue.size >= REBUFFER_FRAMES) {
+                if (frameQueue.size >= effectiveRebufferFrames) {
                     needsRebuffer = false
                     rebufferWaitCount = 0
                     Log.d(TAG, "Re-buffer complete, queue=${frameQueue.size}, resuming playback")
@@ -274,7 +297,7 @@ class LineSink(
                     if (rebufferWaitCount % 50 == 1) {
                         Log.d(
                             TAG,
-                            "Re-buffering: queue=${frameQueue.size}/$REBUFFER_FRAMES, " +
+                            "Re-buffering: queue=${frameQueue.size}/$effectiveRebufferFrames, " +
                                 "waited ${rebufferWaitCount * frameTimeMs}ms, hfCount=${handleFrameCount.get()}",
                         )
                     }
@@ -294,7 +317,10 @@ class LineSink(
                     val underrunMs = System.currentTimeMillis() - underrunStartMs
                     underrunStartMs = null
                     if (underrunMs >= REBUFFER_TRIGGER_MS) {
-                        Log.d(TAG, "Underrun after ${underrunMs}ms, re-buffering to $REBUFFER_FRAMES frames")
+                        Log.d(
+                            TAG,
+                            "Underrun after ${underrunMs}ms, re-buffering to $effectiveRebufferFrames frames",
+                        )
                         needsRebuffer = true
                         frameQueue.offer(frame) // Put back (queue was empty, order preserved)
                         continue
@@ -364,14 +390,16 @@ class LineSink(
             (BUFFER_CAPACITY_MS / detectedFrameTimeMs)
                 .toInt()
                 .coerceIn(MAX_FRAMES, MAX_QUEUE_SLOTS)
-        effectiveAutostartMin =
-            (PREBUFFER_MS / detectedFrameTimeMs)
-                .toInt()
-                .coerceIn(AUTOSTART_MIN, effectiveMaxFrames / 2)
+        val targets = bufferTargetsForFrameTime(detectedFrameTimeMs, effectiveMaxFrames)
+        effectiveAutostartMin = targets.autostartFrames
+        effectiveRebufferFrames = targets.rebufferFrames
         Log.i(
             TAG,
-            "Buffer limits: max=$effectiveMaxFrames, prebuffer=$effectiveAutostartMin " +
-                "(${effectiveMaxFrames * detectedFrameTimeMs}ms/${effectiveAutostartMin * detectedFrameTimeMs}ms)",
+            "Buffer limits: max=$effectiveMaxFrames, prebuffer=$effectiveAutostartMin, " +
+                "rebuffer=$effectiveRebufferFrames " +
+                "(${effectiveMaxFrames * detectedFrameTimeMs}ms/" +
+                "${effectiveAutostartMin * detectedFrameTimeMs}ms/" +
+                "${effectiveRebufferFrames * detectedFrameTimeMs}ms)",
         )
     }
 
@@ -395,6 +423,7 @@ class LineSink(
     ) {
         this.sampleRate = sampleRate
         this.channels = channels
+        bufferLimitsInitialized = false
         Log.d(TAG, "LineSink configured: rate=$sampleRate, channels=$channels")
     }
 }

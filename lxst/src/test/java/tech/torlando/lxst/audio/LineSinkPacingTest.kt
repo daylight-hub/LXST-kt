@@ -6,6 +6,7 @@ package tech.torlando.lxst.audio
 
 import io.mockk.every
 import io.mockk.mockk
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -35,6 +36,47 @@ class LineSinkPacingTest {
         every { mockBridge.writeAudio(any()) } answers {
             writeTimestampsNs.add(System.nanoTime())
         }
+    }
+
+    @Test
+    fun `ULBW startup and rebuffer targets are one packet`() {
+        assertEquals(LineSink.BufferTargets(1, 1), LineSink.bufferTargetsForFrameTime(400L, 15))
+    }
+
+    @Test
+    fun `short profiles retain existing buffering targets`() {
+        assertEquals(LineSink.BufferTargets(8, 5), LineSink.bufferTargetsForFrameTime(60L, 25))
+        assertEquals(LineSink.BufferTargets(50, 5), LineSink.bufferTargetsForFrameTime(10L, 150))
+    }
+
+    @Test
+    fun `ULBW playback autostarts after one 400ms packet`() {
+        val sink = LineSink(mockBridge, autodigest = true, lowLatency = false)
+        sink.configure(sampleRate = 8_000, channels = MONO_CHANNELS)
+
+        sink.handleFrame(FloatArray(3_200))
+
+        assertTrue("ULBW should not wait for a five-packet two-second floor", sink.isRunning())
+        sink.stop()
+        sink.release()
+    }
+
+    @Test
+    fun `configure invalidates targets across ULBW and short profile switches`() {
+        val sink = LineSink(mockBridge, autodigest = false, lowLatency = false)
+
+        sink.configure(sampleRate = 8_000, channels = MONO_CHANNELS)
+        sink.handleFrame(FloatArray(3_200))
+        assertEquals(1, effectiveAutostartFrames(sink))
+
+        sink.configure(sampleRate = 48_000, channels = MONO_CHANNELS)
+        sink.handleFrame(FloatArray(2_880))
+        assertEquals(8, effectiveAutostartFrames(sink))
+
+        sink.configure(sampleRate = 8_000, channels = MONO_CHANNELS)
+        sink.handleFrame(FloatArray(3_200))
+        assertEquals(1, effectiveAutostartFrames(sink))
+        sink.release()
     }
 
     @Test
@@ -188,6 +230,12 @@ class LineSinkPacingTest {
 
         sink.stop()
         sink.release()
+    }
+
+    private fun effectiveAutostartFrames(sink: LineSink): Int {
+        val field = LineSink::class.java.getDeclaredField("effectiveAutostartMin")
+        field.isAccessible = true
+        return field.getInt(sink)
     }
 
     private fun effectiveMaxFrames(frameSize: Int, sampleRate: Int, channels: Int = MONO_CHANNELS): Int {
