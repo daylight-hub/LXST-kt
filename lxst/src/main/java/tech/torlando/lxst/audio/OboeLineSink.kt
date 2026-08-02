@@ -200,9 +200,13 @@ class OboeLineSink(
                 .toInt()
                 .coerceIn(MAX_FRAMES, MAX_QUEUE_SLOTS)
         effectiveAutostartMin =
-            (PREBUFFER_MS / detectedFrameTimeMs)
-                .toInt()
-                .coerceIn(AUTOSTART_MIN, effectiveMaxFrames / 2)
+            if (Codec2PlaybackPolicy.usesSinglePacketBuffer(detectedFrameTimeMs)) {
+                1
+            } else {
+                (PREBUFFER_MS / detectedFrameTimeMs)
+                    .toInt()
+                    .coerceIn(AUTOSTART_MIN, effectiveMaxFrames / 2)
+            }
         Log.i(
             TAG,
             "Buffer limits: max=$effectiveMaxFrames, prebuffer=$effectiveAutostartMin " +
