@@ -34,17 +34,31 @@ class LinkSourcePrebufferTest {
     }
 
     @Test
-    fun `native profile reconfiguration refreshes cached prebuffer`() {
+    fun `native profile switch refreshes cached and engine prebuffer`() {
         val source = LinkSource(bridge = mockk<PacketRouter>(relaxed = true))
         source.prebufferFrames = 1
         var configuredPrebuffer = -1
 
-        source.reconfigureNativePlayback(frameTimeMs = 60) { prebufferFrames ->
+        val updated = source.refreshNativePrebuffer(frameTimeMs = 60) { prebufferFrames ->
             configuredPrebuffer = prebufferFrames
+            true
         }
 
+        assertEquals(true, updated)
         assertEquals(7, source.prebufferFrames)
         assertEquals(7, configuredPrebuffer)
+        source.shutdown()
+    }
+
+    @Test
+    fun `failed native prebuffer update does not publish cached threshold`() {
+        val source = LinkSource(bridge = mockk<PacketRouter>(relaxed = true))
+        source.prebufferFrames = 1
+
+        val updated = source.refreshNativePrebuffer(frameTimeMs = 60) { false }
+
+        assertEquals(false, updated)
+        assertEquals(1, source.prebufferFrames)
         source.shutdown()
     }
 }

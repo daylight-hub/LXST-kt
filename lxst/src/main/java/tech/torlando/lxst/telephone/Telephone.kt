@@ -1218,20 +1218,10 @@ class Telephone(
         reconfigureTransmitPipeline()
 
         if (useNativeCodec && useNativePlayback) {
-            // Phase 3: Recreate native playback geometry and decoder for the new profile.
-            // The ring buffer frame size and prebuffer threshold are fixed at engine
-            // creation, so configureDecoder() alone is insufficient.
+            // Phase 3: Reconfigure native decoder for new profile
             val decodeParams = profile.nativeDecodeParams()
-            val decodedFrameSamples =
-                decodeParams.sampleRate * profile.frameTimeMs / 1000 * decodeParams.channels
-            linkSource?.reconfigureNativePlayback(profile.frameTimeMs) { prebufferFrames ->
-                NativePlaybackEngine.create(
-                    sampleRate = decodeParams.sampleRate,
-                    channels = decodeParams.channels,
-                    frameSamples = decodedFrameSamples,
-                    maxBufferFrames = OboeLineSink.MAX_QUEUE_SLOTS,
-                    prebufferFrames = prebufferFrames,
-                )
+            NativePlaybackEngine.destroyDecoder()
+            val decoderConfigured =
                 NativePlaybackEngine.configureDecoder(
                     codecType = decodeParams.codecType,
                     sampleRate = decodeParams.sampleRate,
@@ -1241,6 +1231,16 @@ class Telephone(
                     opusComplexity = decodeParams.opusComplexity,
                     codec2Mode = decodeParams.codec2LibraryMode,
                 )
+            if (!decoderConfigured) {
+                Log.e(TAG, "Failed to configure native decoder for ${profile.abbreviation}")
+            } else {
+                val prebufferUpdated =
+                    linkSource?.refreshNativePrebuffer(profile.frameTimeMs) { prebufferFrames ->
+                        NativePlaybackEngine.setPrebufferFrames(prebufferFrames)
+                    } ?: false
+                if (!prebufferUpdated) {
+                    Log.w(TAG, "Failed to refresh native prebuffer for ${profile.abbreviation}")
+                }
             }
 
             // Reconfigure audio output for new decode rate

@@ -106,6 +106,17 @@ Java_tech_torlando_lxst_audio_NativePlaybackEngine_nativeIsPlaying(
     return sEngine ? static_cast<jboolean>(sEngine->isPlaying()) : JNI_FALSE;
 }
 
+JNIEXPORT jboolean JNICALL
+Java_tech_torlando_lxst_audio_NativePlaybackEngine_nativeSetPrebufferFrames(
+        JNIEnv* /*env*/,
+        jobject /*thiz*/,
+        jint prebufferFrames) {
+
+    return sEngine
+        ? static_cast<jboolean>(sEngine->setPrebufferFrames(prebufferFrames))
+        : JNI_FALSE;
+}
+
 JNIEXPORT jint JNICALL
 Java_tech_torlando_lxst_audio_NativePlaybackEngine_nativeGetXRunCount(
         JNIEnv* /*env*/,
