@@ -160,9 +160,12 @@ class LinkSource(
      * @param packetData Raw packet data (codec header byte + encoded frame)
      */
     fun onPacketReceived(packetData: ByteArray) {
+        // Snapshot profile ownership before any callback-side work. Once this
+        // callback is admitted, a concurrent profile change cannot restamp its
+        // packet as belonging to the replacement decoder.
+        val packet = QueuedPacket(nativeProfileGeneration.get(), packetData)
         if (!shouldRun.get()) return
         inboundCount.incrementAndGet()
-        val packet = QueuedPacket(nativeProfileGeneration.get(), packetData)
 
         synchronized(receiveLock) {
             // Drop oldest if full (backpressure)
