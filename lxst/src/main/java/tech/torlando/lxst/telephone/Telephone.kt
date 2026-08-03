@@ -1254,7 +1254,12 @@ class Telephone(
                     }
                 } ?: false
             if (!playbackReconfigured) {
-                Log.e(TAG, "Failed to reconfigure native playback for ${profile.abbreviation}")
+                Log.e(TAG, "Failed to reconfigure native playback for ${profile.abbreviation}; ending call")
+                // Replacement destroys the previous engine before configuring
+                // its decoder. Fail closed instead of leaving an established
+                // call permanently silent with an unusable native engine.
+                hangup()
+                return
             }
 
             // Reconfigure audio output for new decode rate
