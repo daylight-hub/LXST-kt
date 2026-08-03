@@ -350,6 +350,73 @@ class NativeCodecInstrumentedTest {
         assertEquals("MQ→HQ native decoder switch: expected 0 xruns", 0, xruns)
     }
 
+    @Test
+    fun nativeDecoder_profileSwitch_mqToUlbw_acceptsChangedFrameGeometry() {
+        val mqFrameSamples =
+            Profile.MQ.nativeDecodeParams().sampleRate * Profile.MQ.frameTimeMs / 1000
+        val created =
+            NativePlaybackEngine.create(
+                sampleRate = Profile.MQ.nativeDecodeParams().sampleRate,
+                channels = 1,
+                frameSamples = mqFrameSamples,
+                maxBufferFrames = 75,
+                prebufferFrames = LinkSource.computePrebufferFrames(Profile.MQ.frameTimeMs),
+            )
+        assertTrue("MQ playback engine should create", created)
+        playbackEngineCreated = true
+
+        val mqParams = Profile.MQ.nativeDecodeParams()
+        assertTrue(
+            "MQ decoder should configure",
+            NativePlaybackEngine.configureDecoder(
+                codecType = mqParams.codecType,
+                sampleRate = mqParams.sampleRate,
+                channels = mqParams.channels,
+                opusApp = mqParams.opusApplication,
+                opusBitrate = mqParams.opusBitrate,
+                opusComplexity = mqParams.opusComplexity,
+                codec2Mode = mqParams.codec2LibraryMode,
+            ),
+        )
+
+        // Reproduce Telephone's established-call profile switch. The native
+        // engine must be recreated because its PCM ring frame geometry is fixed.
+        NativePlaybackEngine.destroyDecoder()
+        val ulbwParams = Profile.ULBW.nativeDecodeParams()
+        val ulbwFrameSamples =
+            ulbwParams.sampleRate * Profile.ULBW.frameTimeMs / 1000 * ulbwParams.channels
+        assertTrue(
+            "ULBW playback geometry should recreate",
+            NativePlaybackEngine.create(
+                sampleRate = ulbwParams.sampleRate,
+                channels = ulbwParams.channels,
+                frameSamples = ulbwFrameSamples,
+                maxBufferFrames = 75,
+                prebufferFrames = LinkSource.computePrebufferFrames(Profile.ULBW.frameTimeMs),
+            ),
+        )
+        assertTrue(
+            "ULBW decoder should configure",
+            NativePlaybackEngine.configureDecoder(
+                codecType = ulbwParams.codecType,
+                sampleRate = ulbwParams.sampleRate,
+                channels = ulbwParams.channels,
+                opusApp = ulbwParams.opusApplication,
+                opusBitrate = ulbwParams.opusBitrate,
+                opusComplexity = ulbwParams.opusComplexity,
+                codec2Mode = ulbwParams.codec2LibraryMode,
+            ),
+        )
+        val ulbwCodec = trackCodec(Profile.ULBW.createCodec())
+        val pcm = generateSineFrame(8000, 1, Profile.ULBW.frameTimeMs)
+        val encoded = ulbwCodec.encode(pcm)
+        assertTrue(
+            "MQ→ULBW switch must accept the 3200-sample decoded frame",
+            NativePlaybackEngine.writeEncodedPacket(encoded, 0, encoded.size),
+        )
+        assertEquals("ULBW frame should enter the native ring", 1, NativePlaybackEngine.getBufferedFrameCount())
+    }
+
     // =====================================================================
     //  TX ENCODER: Native encode from microphone capture
     // =====================================================================

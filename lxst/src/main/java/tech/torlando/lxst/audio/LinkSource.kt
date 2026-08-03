@@ -42,6 +42,11 @@ class LinkSource(
     private val bridge: PacketRouter,
     var sink: Sink? = null,
 ) : RemoteSource() {
+    private data class QueuedPacket(
+        val profileGeneration: Int,
+        val data: ByteArray,
+    )
+
     companion object {
         private const val TAG = "Columba:LinkSource"
 
@@ -132,8 +137,10 @@ class LinkSource(
     @Volatile
     var deferPlaybackStart: Boolean = false
     private val playbackStarted = AtomicBoolean(false)
-    private val packetQueue = ArrayDeque<ByteArray>(MAX_PACKETS)
+    private val nativeProfileGeneration = AtomicInteger(0)
+    private val packetQueue = ArrayDeque<QueuedPacket>(MAX_PACKETS)
     private val receiveLock = Any()
+    private val nativePlaybackLock = Any()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     init {
@@ -153,6 +160,10 @@ class LinkSource(
      * @param packetData Raw packet data (codec header byte + encoded frame)
      */
     fun onPacketReceived(packetData: ByteArray) {
+        // Snapshot profile ownership before any callback-side work. Once this
+        // callback is admitted, a concurrent profile change cannot restamp its
+        // packet as belonging to the replacement decoder.
+        val packet = QueuedPacket(nativeProfileGeneration.get(), packetData)
         if (!shouldRun.get()) return
         inboundCount.incrementAndGet()
 
@@ -161,7 +172,7 @@ class LinkSource(
             if (packetQueue.size >= MAX_PACKETS) {
                 packetQueue.removeFirst()
             }
-            packetQueue.addLast(packetData)
+            packetQueue.addLast(packet)
         }
     }
 
@@ -193,25 +204,27 @@ class LinkSource(
         }
 
         if (useNativeCodec) {
-            // Phase 3: Send encoded data directly to native playback engine.
-            // Skip header byte via offset parameter (no copyOfRange allocation).
-            try {
-                NativePlaybackEngine.writeEncodedPacket(data, 1, data.size - 1)
+            // Profile changes replace the fixed-geometry native ring. Keep JNI
+            // packet writes outside that replacement window.
+            synchronized(nativePlaybackLock) {
+                // Phase 3: Send encoded data directly to native playback engine.
+                // Skip header byte via offset parameter (no copyOfRange allocation).
+                try {
+                    NativePlaybackEngine.writeEncodedPacket(data, 1, data.size - 1)
 
-                // Auto-start playback stream once prebuffer has accumulated.
-                // Mirrors Phase 2's OboeLineSink pattern: defer startStream() until
-                // the ring buffer has enough data to prevent callback starvation.
-                if (deferPlaybackStart && !playbackStarted.get()) {
-                    val buffered = NativePlaybackEngine.getBufferedFrameCount()
-                    if (buffered >= prebufferFrames) {
-                        if (playbackStarted.compareAndSet(false, true)) {
-                            val started = NativePlaybackEngine.startStream()
-                            Log.i(TAG, "Auto-started native playback: prebuf=$buffered/$prebufferFrames, ok=$started")
+                    // Auto-start playback stream once prebuffer has accumulated.
+                    if (deferPlaybackStart && !playbackStarted.get()) {
+                        val buffered = NativePlaybackEngine.getBufferedFrameCount()
+                        if (buffered >= prebufferFrames) {
+                            if (playbackStarted.compareAndSet(false, true)) {
+                                val started = NativePlaybackEngine.startStream()
+                                Log.i(TAG, "Auto-started native playback: prebuf=$buffered/$prebufferFrames, ok=$started")
+                            }
                         }
                     }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Native decode error, dropping frame: ${e.message}")
                 }
-            } catch (e: Exception) {
-                Log.w(TAG, "Native decode error, dropping frame: ${e.message}")
             }
         } else {
             // Phase 2: Kotlin codec decode → float32 → Mixer → sink
@@ -240,32 +253,52 @@ class LinkSource(
      */
     private suspend fun processingLoop() {
         while (shouldRun.get()) {
-            val packet: ByteArray?
-            synchronized(receiveLock) {
-                packet = packetQueue.removeFirstOrNull()
-            }
-            if (packet != null) {
-                processPacket(packet)
+            if (useNativeCodec) {
+                // Keep dequeue and native decode in the same profile lock.
+                // Otherwise a packet can be removed under the old profile,
+                // wait while the ring is replaced, then enter the new decoder.
+                val processed =
+                    synchronized(nativePlaybackLock) {
+                        val packet = synchronized(receiveLock) { packetQueue.removeFirstOrNull() }
+                        if (packet != null && packet.profileGeneration == nativeProfileGeneration.get()) {
+                            processPacket(packet.data)
+                        }
+                        packet != null
+                    }
+                if (!processed) delay(2)
             } else {
-                delay(2) // Brief sleep when queue empty
+                val packet = synchronized(receiveLock) { packetQueue.removeFirstOrNull() }
+                if (packet != null) {
+                    processPacket(packet.data)
+                } else {
+                    delay(2) // Brief sleep when queue empty
+                }
             }
         }
     }
 
-    /**
-     * Refresh native and Kotlin-side prebuffer thresholds after a profile switch.
-     *
-     * The cached value is published only after the native engine accepts the
-     * update, keeping both sides consistent if JNI configuration fails.
-     */
-    internal fun refreshNativePrebuffer(
+    /** Recreate fixed native playback geometry after a profile switch. */
+    internal fun reconfigureNativePlayback(
         frameTimeMs: Int,
-        updateEngine: (prebufferFrames: Int) -> Boolean,
+        configureEngine: (prebufferFrames: Int) -> Boolean,
     ): Boolean {
         val updatedPrebufferFrames = computePrebufferFrames(frameTimeMs)
-        if (!updateEngine(updatedPrebufferFrames)) return false
-        prebufferFrames = updatedPrebufferFrames
-        return true
+        return synchronized(nativePlaybackLock) {
+            // Stamp all subsequent callback packets with the replacement profile.
+            // A callback that sampled the old generation before blocking on
+            // receiveLock remains stale even if it enqueues after this clear.
+            nativeProfileGeneration.incrementAndGet()
+            synchronized(receiveLock) {
+                packetQueue.clear()
+            }
+            playbackStarted.set(false)
+            if (!configureEngine(updatedPrebufferFrames)) {
+                false
+            } else {
+                prebufferFrames = updatedPrebufferFrames
+                true
+            }
+        }
     }
 
     /**

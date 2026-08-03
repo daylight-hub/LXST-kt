@@ -17,9 +17,13 @@ import android.util.Log
  */
 object NativePlaybackEngine {
     private const val TAG = "LXST:NativePlayback"
+    private val engineLock = Any()
 
     @Volatile
     private var libraryLoaded = false
+
+    /** Serialize a multi-call engine lifecycle transaction with all JNI access. */
+    internal fun <T> withExclusiveAccess(block: () -> T): T = synchronized(engineLock, block)
 
     fun ensureLoaded() {
         if (!libraryLoaded) {
@@ -53,9 +57,9 @@ object NativePlaybackEngine {
         frameSamples: Int,
         maxBufferFrames: Int,
         prebufferFrames: Int,
-    ): Boolean {
+    ): Boolean = synchronized(engineLock) {
         ensureLoaded()
-        return nativeCreate(sampleRate, channels, frameSamples, maxBufferFrames, prebufferFrames)
+        nativeCreate(sampleRate, channels, frameSamples, maxBufferFrames, prebufferFrames)
     }
 
     /**
@@ -64,12 +68,15 @@ object NativePlaybackEngine {
      * @param samples ShortArray of PCM int16 samples
      * @return true if written without drop, false if oldest frame was dropped
      */
-    fun writeSamples(samples: ShortArray): Boolean = nativeWriteSamples(samples)
+    fun writeSamples(samples: ShortArray): Boolean = synchronized(engineLock) {
+        ensureLoaded()
+        nativeWriteSamples(samples)
+    }
 
     /** Open and start the Oboe output stream. */
-    fun startStream(): Boolean {
+    fun startStream(): Boolean = synchronized(engineLock) {
         ensureLoaded()
-        return nativeStartStream()
+        nativeStartStream()
     }
 
     /**
@@ -78,46 +85,64 @@ object NativePlaybackEngine {
      * Called when the speaker/earpiece toggle changes so the native stream
      * binds to the newly-routed audio device.
      */
-    fun restartStream(): Boolean {
+    fun restartStream(): Boolean = synchronized(engineLock) {
         ensureLoaded()
-        return nativeRestartStream()
+        nativeRestartStream()
     }
 
     /** Stop and close the Oboe output stream. */
-    fun stopStream() {
+    fun stopStream() = synchronized(engineLock) {
         ensureLoaded()
         nativeStopStream()
     }
 
     /** Release all native resources. */
-    fun destroy() {
+    fun destroy() = synchronized(engineLock) {
         ensureLoaded()
         nativeDestroy()
     }
 
     /** Number of frames currently buffered in the native ring buffer. */
-    fun getBufferedFrameCount(): Int = nativeGetBufferedFrameCount()
+    fun getBufferedFrameCount(): Int = synchronized(engineLock) {
+        ensureLoaded()
+        nativeGetBufferedFrameCount()
+    }
 
     /** True if the Oboe stream is open and playing. */
-    fun isPlaying(): Boolean = nativeIsPlaying()
+    fun isPlaying(): Boolean = synchronized(engineLock) {
+        ensureLoaded()
+        nativeIsPlaying()
+    }
 
     /** Update the prebuffer threshold without replacing the native engine. */
-    fun setPrebufferFrames(prebufferFrames: Int): Boolean {
+    fun setPrebufferFrames(prebufferFrames: Int): Boolean = synchronized(engineLock) {
         ensureLoaded()
-        return nativeSetPrebufferFrames(prebufferFrames)
+        nativeSetPrebufferFrames(prebufferFrames)
     }
 
     /** Cumulative underrun (xrun) count from the Oboe stream. */
-    fun getXRunCount(): Int = nativeGetXRunCount()
+    fun getXRunCount(): Int = synchronized(engineLock) {
+        ensureLoaded()
+        nativeGetXRunCount()
+    }
 
     /** Frames read from ring buffer by the Oboe callback (diagnostic). */
-    fun getCallbackFrameCount(): Int = nativeGetCallbackFrameCount()
+    fun getCallbackFrameCount(): Int = synchronized(engineLock) {
+        ensureLoaded()
+        nativeGetCallbackFrameCount()
+    }
 
     /** Callbacks that output full silence due to empty ring buffer (diagnostic). */
-    fun getCallbackSilenceCount(): Int = nativeGetCallbackSilenceCount()
+    fun getCallbackSilenceCount(): Int = synchronized(engineLock) {
+        ensureLoaded()
+        nativeGetCallbackSilenceCount()
+    }
 
     /** Callbacks that used Opus PLC instead of silence (diagnostic). */
-    fun getCallbackPlcCount(): Int = nativeGetCallbackPlcCount()
+    fun getCallbackPlcCount(): Int = synchronized(engineLock) {
+        ensureLoaded()
+        nativeGetCallbackPlcCount()
+    }
 
     // --- Phase 3: Native codec methods ---
 
@@ -140,9 +165,9 @@ object NativePlaybackEngine {
         opusBitrate: Int = 0,
         opusComplexity: Int = 10,
         codec2Mode: Int = 0,
-    ): Boolean {
+    ): Boolean = synchronized(engineLock) {
         ensureLoaded()
-        return nativeConfigureDecoder(
+        nativeConfigureDecoder(
             codecType,
             sampleRate,
             channels,
@@ -167,20 +192,23 @@ object NativePlaybackEngine {
         data: ByteArray,
         offset: Int,
         length: Int,
-    ): Boolean = nativeWriteEncodedPacket(data, offset, length)
+    ): Boolean = synchronized(engineLock) {
+        ensureLoaded()
+        nativeWriteEncodedPacket(data, offset, length)
+    }
 
     /**
      * Set playback mute state.
      *
      * When muted, Oboe callback outputs silence but ring buffer keeps accumulating.
      */
-    fun setPlaybackMute(mute: Boolean) {
+    fun setPlaybackMute(mute: Boolean) = synchronized(engineLock) {
         ensureLoaded()
         nativeSetPlaybackMute(mute)
     }
 
     /** Destroy the native decoder, freeing codec resources. */
-    fun destroyDecoder() {
+    fun destroyDecoder() = synchronized(engineLock) {
         ensureLoaded()
         nativeDestroyDecoder()
     }
