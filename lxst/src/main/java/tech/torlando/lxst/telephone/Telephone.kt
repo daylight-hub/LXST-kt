@@ -1225,14 +1225,17 @@ class Telephone(
                 decodeParams.sampleRate * profile.frameTimeMs / 1000 * decodeParams.channels
             val playbackReconfigured =
                 linkSource?.reconfigureNativePlayback(profile.frameTimeMs) { prebufferFrames ->
-                    NativePlaybackEngine.create(
+                    val engineCreated = NativePlaybackEngine.create(
                         sampleRate = decodeParams.sampleRate,
                         channels = decodeParams.channels,
                         frameSamples = decodedFrameSamples,
                         maxBufferFrames = OboeLineSink.MAX_QUEUE_SLOTS,
                         prebufferFrames = prebufferFrames,
-                    ) &&
-                        NativePlaybackEngine.configureDecoder(
+                    )
+                    if (!engineCreated) {
+                        false
+                    } else {
+                        val decoderConfigured = NativePlaybackEngine.configureDecoder(
                             codecType = decodeParams.codecType,
                             sampleRate = decodeParams.sampleRate,
                             channels = decodeParams.channels,
@@ -1241,6 +1244,12 @@ class Telephone(
                             opusComplexity = decodeParams.opusComplexity,
                             codec2Mode = decodeParams.codec2LibraryMode,
                         )
+                        if (decoderConfigured) {
+                            // create() replaces the engine and resets native mute.
+                            NativePlaybackEngine.setPlaybackMute(receiveMuted)
+                        }
+                        decoderConfigured
+                    }
                 } ?: false
             if (!playbackReconfigured) {
                 Log.e(TAG, "Failed to reconfigure native playback for ${profile.abbreviation}")

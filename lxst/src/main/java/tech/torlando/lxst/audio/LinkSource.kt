@@ -243,14 +243,24 @@ class LinkSource(
      */
     private suspend fun processingLoop() {
         while (shouldRun.get()) {
-            val packet: ByteArray?
-            synchronized(receiveLock) {
-                packet = packetQueue.removeFirstOrNull()
-            }
-            if (packet != null) {
-                processPacket(packet)
+            if (useNativeCodec) {
+                // Keep dequeue and native decode in the same profile lock.
+                // Otherwise a packet can be removed under the old profile,
+                // wait while the ring is replaced, then enter the new decoder.
+                val processed =
+                    synchronized(nativePlaybackLock) {
+                        val packet = synchronized(receiveLock) { packetQueue.removeFirstOrNull() }
+                        if (packet != null) processPacket(packet)
+                        packet != null
+                    }
+                if (!processed) delay(2)
             } else {
-                delay(2) // Brief sleep when queue empty
+                val packet = synchronized(receiveLock) { packetQueue.removeFirstOrNull() }
+                if (packet != null) {
+                    processPacket(packet)
+                } else {
+                    delay(2) // Brief sleep when queue empty
+                }
             }
         }
     }
