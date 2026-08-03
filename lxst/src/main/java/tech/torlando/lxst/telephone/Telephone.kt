@@ -1225,30 +1225,32 @@ class Telephone(
                 decodeParams.sampleRate * profile.frameTimeMs / 1000 * decodeParams.channels
             val playbackReconfigured =
                 linkSource?.reconfigureNativePlayback(profile.frameTimeMs) { prebufferFrames ->
-                    val engineCreated = NativePlaybackEngine.create(
-                        sampleRate = decodeParams.sampleRate,
-                        channels = decodeParams.channels,
-                        frameSamples = decodedFrameSamples,
-                        maxBufferFrames = OboeLineSink.MAX_QUEUE_SLOTS,
-                        prebufferFrames = prebufferFrames,
-                    )
-                    if (!engineCreated) {
-                        false
-                    } else {
-                        val decoderConfigured = NativePlaybackEngine.configureDecoder(
-                            codecType = decodeParams.codecType,
+                    NativePlaybackEngine.withExclusiveAccess {
+                        val engineCreated = NativePlaybackEngine.create(
                             sampleRate = decodeParams.sampleRate,
                             channels = decodeParams.channels,
-                            opusApp = decodeParams.opusApplication,
-                            opusBitrate = decodeParams.opusBitrate,
-                            opusComplexity = decodeParams.opusComplexity,
-                            codec2Mode = decodeParams.codec2LibraryMode,
+                            frameSamples = decodedFrameSamples,
+                            maxBufferFrames = OboeLineSink.MAX_QUEUE_SLOTS,
+                            prebufferFrames = prebufferFrames,
                         )
-                        if (decoderConfigured) {
-                            // create() replaces the engine and resets native mute.
-                            NativePlaybackEngine.setPlaybackMute(receiveMuted)
+                        if (!engineCreated) {
+                            false
+                        } else {
+                            val decoderConfigured = NativePlaybackEngine.configureDecoder(
+                                codecType = decodeParams.codecType,
+                                sampleRate = decodeParams.sampleRate,
+                                channels = decodeParams.channels,
+                                opusApp = decodeParams.opusApplication,
+                                opusBitrate = decodeParams.opusBitrate,
+                                opusComplexity = decodeParams.opusComplexity,
+                                codec2Mode = decodeParams.codec2LibraryMode,
+                            )
+                            if (decoderConfigured) {
+                                // create() replaces the engine and resets native mute.
+                                NativePlaybackEngine.setPlaybackMute(receiveMuted)
+                            }
+                            decoderConfigured
                         }
-                        decoderConfigured
                     }
                 } ?: false
             if (!playbackReconfigured) {
