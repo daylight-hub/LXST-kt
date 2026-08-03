@@ -42,6 +42,11 @@ class LinkSource(
     private val bridge: PacketRouter,
     var sink: Sink? = null,
 ) : RemoteSource() {
+    private data class QueuedPacket(
+        val profileGeneration: Int,
+        val data: ByteArray,
+    )
+
     companion object {
         private const val TAG = "Columba:LinkSource"
 
@@ -132,7 +137,8 @@ class LinkSource(
     @Volatile
     var deferPlaybackStart: Boolean = false
     private val playbackStarted = AtomicBoolean(false)
-    private val packetQueue = ArrayDeque<ByteArray>(MAX_PACKETS)
+    private val nativeProfileGeneration = AtomicInteger(0)
+    private val packetQueue = ArrayDeque<QueuedPacket>(MAX_PACKETS)
     private val receiveLock = Any()
     private val nativePlaybackLock = Any()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
@@ -156,13 +162,14 @@ class LinkSource(
     fun onPacketReceived(packetData: ByteArray) {
         if (!shouldRun.get()) return
         inboundCount.incrementAndGet()
+        val packet = QueuedPacket(nativeProfileGeneration.get(), packetData)
 
         synchronized(receiveLock) {
             // Drop oldest if full (backpressure)
             if (packetQueue.size >= MAX_PACKETS) {
                 packetQueue.removeFirst()
             }
-            packetQueue.addLast(packetData)
+            packetQueue.addLast(packet)
         }
     }
 
@@ -250,14 +257,16 @@ class LinkSource(
                 val processed =
                     synchronized(nativePlaybackLock) {
                         val packet = synchronized(receiveLock) { packetQueue.removeFirstOrNull() }
-                        if (packet != null) processPacket(packet)
+                        if (packet != null && packet.profileGeneration == nativeProfileGeneration.get()) {
+                            processPacket(packet.data)
+                        }
                         packet != null
                     }
                 if (!processed) delay(2)
             } else {
                 val packet = synchronized(receiveLock) { packetQueue.removeFirstOrNull() }
                 if (packet != null) {
-                    processPacket(packet)
+                    processPacket(packet.data)
                 } else {
                     delay(2) // Brief sleep when queue empty
                 }
@@ -272,6 +281,10 @@ class LinkSource(
     ): Boolean {
         val updatedPrebufferFrames = computePrebufferFrames(frameTimeMs)
         return synchronized(nativePlaybackLock) {
+            // Stamp all subsequent callback packets with the replacement profile.
+            // A callback that sampled the old generation before blocking on
+            // receiveLock remains stale even if it enqueues after this clear.
+            nativeProfileGeneration.incrementAndGet()
             synchronized(receiveLock) {
                 packetQueue.clear()
             }
