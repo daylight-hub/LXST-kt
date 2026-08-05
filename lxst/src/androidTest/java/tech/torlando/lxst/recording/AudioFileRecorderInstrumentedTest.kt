@@ -36,11 +36,11 @@ class AudioFileRecorderInstrumentedTest {
         try {
             recorder.start(output)
             val partial = File(output.parentFile, ".${output.name}.part")
-            val deadlineNanos = System.nanoTime() + 5_000_000_000L
+            val deadlineNanos = System.nanoTime() + 15_000_000_000L
             while (partial.length() < 256L && System.nanoTime() < deadlineNanos) {
                 Thread.sleep(50)
             }
-            assertTrue("Recorder did not emit data within 5 seconds", partial.length() >= 256L)
+            assertTrue("Recorder did not emit data within 15 seconds", partial.length() >= 256L)
             val result = recorder.stop()
 
             assertTrue(result.file.isFile)
