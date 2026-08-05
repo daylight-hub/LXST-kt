@@ -57,6 +57,9 @@ class AudioFileRecorder internal constructor(
             require(!outputFile.exists()) { "Output file already exists: $outputFile" }
             val parent = outputFile.absoluteFile.parentFile
                 ?: throw AudioRecordingException("Output file has no parent directory")
+            if (parent.exists() && !parent.isDirectory) {
+                throw AudioRecordingException("Output parent is not a directory: $parent")
+            }
             if (!parent.exists() && !parent.mkdirs()) {
                 throw AudioRecordingException("Could not create output directory: $parent")
             }

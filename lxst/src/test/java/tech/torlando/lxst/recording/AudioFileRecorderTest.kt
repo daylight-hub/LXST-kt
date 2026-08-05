@@ -112,6 +112,27 @@ class AudioFileRecorderTest {
     }
 
     @Test
+    fun `non-directory output parent fails before creating backend`() {
+        val parentFile = temporaryFolder.newFile("not-a-directory")
+        val output = java.io.File(parentFile, "voice.ogg")
+        var factoryCalls = 0
+        val recorder =
+            AudioFileRecorder(
+                backendFactory = RecorderBackendFactory { _, _ ->
+                    factoryCalls++
+                    FakeRecorderBackend()
+                },
+                sdkInt = { 35 },
+                elapsedRealtimeMillis = { 0L },
+            )
+
+        val thrown = runCatching { recorder.start(output) }.exceptionOrNull()
+
+        assertTrue(thrown is AudioRecordingException)
+        assertEquals(0, factoryCalls)
+    }
+
+    @Test
     fun `duplicate start and stop before start are rejected`() {
         val first = temporaryFolder.newFile("first.ogg").also { it.delete() }
         val second = temporaryFolder.newFile("second.ogg").also { it.delete() }
