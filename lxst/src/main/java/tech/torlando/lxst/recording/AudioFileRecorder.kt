@@ -25,9 +25,7 @@ class AudioFileRecorder internal constructor(
         config: RecordingConfig = RecordingConfig(),
     ) : this(
         config = config,
-        backendFactory = RecorderBackendFactory { file, settings ->
-            AndroidMediaRecorderBackend(context, file, settings)
-        },
+        backendFactory = androidRecorderBackendFactory(context),
         sdkInt = { Build.VERSION.SDK_INT },
         elapsedRealtimeMillis = SystemClock::elapsedRealtime,
     )
@@ -148,5 +146,12 @@ class AudioFileRecorder internal constructor(
         requestedOutput = null
         partialOutput = null
         startedAtMillis = null
+    }
+}
+
+private fun androidRecorderBackendFactory(context: Context): RecorderBackendFactory {
+    val appContext = context.applicationContext
+    return RecorderBackendFactory { file, settings ->
+        AndroidMediaRecorderBackend(appContext, file, settings)
     }
 }
