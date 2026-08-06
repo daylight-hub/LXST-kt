@@ -15,10 +15,11 @@ class AudioFileRecorderTest {
     @Test
     fun `stop publishes only a finalized non-empty recording`() = runTest {
         val output = temporaryFolder.newFile("voice.ogg").also { it.delete() }
-        val backend = FakeRecorderBackend(onStop = { outputPartFor(output).writeBytes(byteArrayOf(1, 2, 3)) })
+        lateinit var partial: java.io.File
+        val backend = FakeRecorderBackend(onStop = { partial.writeBytes(byteArrayOf(1, 2, 3)) })
         val recorder =
             AudioFileRecorder(
-                backendFactory = RecorderBackendFactory { _, _ -> backend },
+                backendFactory = RecorderBackendFactory { file, _ -> partial = file; backend },
                 sdkInt = { 35 },
                 elapsedRealtimeMillis = sequenceOf(100L, 350L).iterator()::next,
             )
@@ -32,7 +33,7 @@ class AudioFileRecorderTest {
         assertEquals(AudioFileFormat.OGG_OPUS, result.format)
         assertEquals(RecorderState.Completed(result), recorder.state.value)
         assertTrue(output.exists())
-        assertFalse(outputPartFor(output).exists())
+        assertFalse(partial.exists())
         assertEquals(1, backend.stopCalls)
         assertEquals(1, backend.releaseCalls)
     }
@@ -40,9 +41,9 @@ class AudioFileRecorderTest {
     @Test
     fun `cancel releases once and removes the partial file`() {
         val output = temporaryFolder.newFile("cancelled.ogg").also { it.delete() }
-        val partial = outputPartFor(output)
+        lateinit var partial: java.io.File
         val backend = FakeRecorderBackend(onStart = { partial.writeBytes(byteArrayOf(1)) })
-        val recorder = recorderWith(backend)
+        val recorder = recorderWith(backend) { partial = it }
 
         recorder.start(output)
         recorder.cancel()
@@ -57,14 +58,14 @@ class AudioFileRecorderTest {
     @Test
     fun `stop failure releases once deletes partial and reports failure`() {
         val output = temporaryFolder.newFile("failed.ogg").also { it.delete() }
-        val partial = outputPartFor(output)
+        lateinit var partial: java.io.File
         val failure = IllegalStateException("too short")
         val backend =
             FakeRecorderBackend(
                 onStart = { partial.writeBytes(byteArrayOf(1)) },
                 onStop = { throw failure },
             )
-        val recorder = recorderWith(backend)
+        val recorder = recorderWith(backend) { partial = it }
 
         recorder.start(output)
         val thrown = runCatching { recorder.stop() }.exceptionOrNull()
@@ -145,14 +146,40 @@ class AudioFileRecorderTest {
         recorder.cancel()
     }
 
-    private fun recorderWith(backend: RecorderBackend) =
+    @Test
+    fun `independent recorders never share partial file ownership`() {
+        val output = temporaryFolder.newFile("shared.ogg").also { it.delete() }
+        lateinit var firstPartial: java.io.File
+        lateinit var secondPartial: java.io.File
+        val firstBackend = FakeRecorderBackend(onStop = { firstPartial.writeBytes(byteArrayOf(1)) })
+        val secondBackend = FakeRecorderBackend(onStop = { secondPartial.writeBytes(byteArrayOf(2)) })
+        val firstRecorder = recorderWith(firstBackend) { firstPartial = it }
+        val secondRecorder = recorderWith(secondBackend) { secondPartial = it }
+
+        firstRecorder.start(output)
+        secondRecorder.start(output)
+
+        assertTrue(firstPartial != secondPartial)
+        assertTrue(firstPartial.exists())
+        assertTrue(secondPartial.exists())
+
+        firstRecorder.stop()
+        val secondFailure = runCatching { secondRecorder.stop() }.exceptionOrNull()
+
+        assertTrue(output.readBytes().contentEquals(byteArrayOf(1)))
+        assertTrue(secondFailure is AudioRecordingException)
+        assertFalse(secondPartial.exists())
+    }
+
+    private fun recorderWith(
+        backend: RecorderBackend,
+        capturePartial: (java.io.File) -> Unit = {},
+    ) =
         AudioFileRecorder(
-            backendFactory = RecorderBackendFactory { _, _ -> backend },
+            backendFactory = RecorderBackendFactory { file, _ -> capturePartial(file); backend },
             sdkInt = { 35 },
             elapsedRealtimeMillis = { 100L },
         )
-
-    private fun outputPartFor(output: java.io.File) = java.io.File(output.parentFile, ".${output.name}.part")
 
     private class FakeRecorderBackend(
         private val onStart: () -> Unit = {},

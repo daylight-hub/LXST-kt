@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.asStateFlow
 /**
  * Records a microphone stream to a finalized Ogg Opus file.
  *
- * Callers must hold `android.permission.RECORD_AUDIO`. A partial sibling file is used while
+ * Callers must hold `android.permission.RECORD_AUDIO`. A unique partial sibling file is used while
  * recording, so [stop] is the only operation that can publish the requested output path.
  */
 class AudioFileRecorder internal constructor(
@@ -61,10 +61,9 @@ class AudioFileRecorder internal constructor(
             if (!parent.exists() && !parent.mkdirs()) {
                 throw AudioRecordingException("Could not create output directory: $parent")
             }
-            val partial = File(parent, ".${outputFile.name}.part")
-            if (partial.exists() && !partial.delete()) {
-                throw AudioRecordingException("Could not remove stale partial recording: $partial")
-            }
+            val partial =
+                runCatching { File.createTempFile(".${outputFile.name}.", ".part", parent) }
+                    .getOrElse { throw AudioRecordingException("Could not create partial recording", it) }
 
             var createdBackend: RecorderBackend? = null
             try {
