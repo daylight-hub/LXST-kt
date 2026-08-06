@@ -199,6 +199,15 @@ oboe::DataCallbackResult OboeCaptureEngine::onAudioReady(
                 }
             }
 
+            // Battery saver: half-duplex PTT released. Skip filters + encode
+            // entirely -- no packet produced, no codec work. Distinct from mute,
+            // which encodes silence. continue keeps the input stream drained so
+            // there is no XRun; it simply produces no frame this iteration.
+            if (transmitSquelched_.load(std::memory_order_relaxed)) {
+                accumCount_ = 0;
+                continue;
+            }
+
             // Apply filters
             if (filterChain_) {
                 filterChain_->process(frameData, frameSamples_, sampleRate_);
@@ -277,6 +286,10 @@ bool OboeCaptureEngine::readEncodedPacket(uint8_t* dest, int maxLength, int* act
 
 void OboeCaptureEngine::setCaptureMute(bool mute) {
     captureMuted_.store(mute, std::memory_order_relaxed);
+}
+
+void OboeCaptureEngine::setTransmitSquelch(bool squelch) {
+    transmitSquelched_.store(squelch, std::memory_order_relaxed);
 }
 
 void OboeCaptureEngine::destroyEncoder() {

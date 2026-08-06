@@ -105,6 +105,7 @@ public:
      * receives packets (prevents jitter buffer underrun).
      */
     void setCaptureMute(bool mute);
+    void setTransmitSquelch(bool squelch);
 
     /** Destroy the native encoder, freeing codec resources. */
     void destroyEncoder();
@@ -141,6 +142,7 @@ private:
     std::unique_ptr<EncodedRingBuffer> encodedRingBuffer_;
     std::unique_ptr<int16_t[]> monoToStereoBuf_;  // For SHQ stereo upmix
     std::atomic<bool> captureMuted_{false};
+    std::atomic<bool> transmitSquelched_{false};
     bool encodeInCallback_ = false;  // True when encoder is configured
 
     // Pre-allocated encode output buffer (max Opus output ~1275 bytes)

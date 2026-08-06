@@ -176,6 +176,17 @@ Java_tech_torlando_lxst_audio_NativeCaptureEngine_nativeSetCaptureMute(
 }
 
 JNIEXPORT void JNICALL
+Java_tech_torlando_lxst_audio_NativeCaptureEngine_nativeSetTransmitSquelch(
+        JNIEnv* /*env*/,
+        jobject /*thiz*/,
+        jboolean squelch) {
+
+    if (sCaptureEngine) {
+        sCaptureEngine->setTransmitSquelch(squelch);
+    }
+}
+
+JNIEXPORT void JNICALL
 Java_tech_torlando_lxst_audio_NativeCaptureEngine_nativeDestroyEncoder(
         JNIEnv* /*env*/,
         jobject /*thiz*/) {

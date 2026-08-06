@@ -387,6 +387,18 @@ class Telephone(
     }
 
     /**
+     * Battery saver: skip the native encode while transmit is squelched
+     * (half duplex, PTT released). No packets produced, no codec work -- unlike
+     * muteTransmit, which encodes silence. No-op on the Phase-2 Kotlin path.
+     */
+    fun setTransmitSquelch(squelch: Boolean) {
+        Log.d(TAG, "Transmit squelch: $squelch")
+        if (useNativeCodec && useNativePlayback) {
+            NativeCaptureEngine.setTransmitSquelch(squelch)
+        }
+    }
+
+    /**
      * Mute or unmute receive (speaker).
      *
      * Matches Python Telephony.py mute_receive() (lines 458-460).

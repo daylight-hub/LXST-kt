@@ -132,6 +132,16 @@ object NativeCaptureEngine {
         nativeSetCaptureMute(mute)
     }
 
+    /**
+     * Half-duplex transmit squelch. When true, the capture callback skips the
+     * encoder entirely -- no packets produced, no codec work. Battery saver for
+     * PTT-released periods. Distinct from setCaptureMute (which encodes silence).
+     */
+    fun setTransmitSquelch(squelch: Boolean) {
+        ensureLoaded()
+        nativeSetTransmitSquelch(squelch)
+    }
+
     /** Destroy the native encoder, freeing codec resources. */
     fun destroyEncoder() {
         ensureLoaded()
@@ -176,6 +186,8 @@ object NativeCaptureEngine {
     private external fun nativeReadEncodedPacket(dest: ByteArray): Int
 
     private external fun nativeSetCaptureMute(mute: Boolean)
+
+    private external fun nativeSetTransmitSquelch(squelch: Boolean)
 
     private external fun nativeDestroyEncoder()
 }
