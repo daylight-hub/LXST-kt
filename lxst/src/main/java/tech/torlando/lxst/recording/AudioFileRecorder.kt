@@ -103,8 +103,10 @@ class AudioFileRecorder internal constructor(
                 if (!partial.isFile || partial.length() <= 0L) {
                     throw AudioRecordingException("Recorder produced an empty output file")
                 }
-                if (output.exists() || !partial.renameTo(output)) {
-                    throw AudioRecordingException("Could not publish finalized recording: $output")
+                synchronized(publicationLock) {
+                    if (output.exists() || !partial.renameTo(output)) {
+                        throw AudioRecordingException("Could not publish finalized recording: $output")
+                    }
                 }
                 val result =
                     RecordedAudio(
@@ -145,6 +147,10 @@ class AudioFileRecorder internal constructor(
         requestedOutput = null
         partialOutput = null
         startedAtMillis = null
+    }
+
+    private companion object {
+        val publicationLock = Any()
     }
 }
 

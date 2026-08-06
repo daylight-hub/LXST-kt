@@ -7,6 +7,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 
 class AudioFileRecorderTest {
     @get:Rule
@@ -147,12 +150,27 @@ class AudioFileRecorderTest {
     }
 
     @Test
-    fun `independent recorders never share partial file ownership`() {
+    fun `concurrent recorders never share partial ownership or replace finalized output`() {
         val output = temporaryFolder.newFile("shared.ogg").also { it.delete() }
         lateinit var firstPartial: java.io.File
         lateinit var secondPartial: java.io.File
-        val firstBackend = FakeRecorderBackend(onStop = { firstPartial.writeBytes(byteArrayOf(1)) })
-        val secondBackend = FakeRecorderBackend(onStop = { secondPartial.writeBytes(byteArrayOf(2)) })
+        val bothStopped = CountDownLatch(2)
+        val firstBackend =
+            FakeRecorderBackend(
+                onStop = {
+                    firstPartial.writeBytes(byteArrayOf(1))
+                    bothStopped.countDown()
+                    check(bothStopped.await(5, TimeUnit.SECONDS))
+                },
+            )
+        val secondBackend =
+            FakeRecorderBackend(
+                onStop = {
+                    secondPartial.writeBytes(byteArrayOf(2))
+                    bothStopped.countDown()
+                    check(bothStopped.await(5, TimeUnit.SECONDS))
+                },
+            )
         val firstRecorder = recorderWith(firstBackend) { firstPartial = it }
         val secondRecorder = recorderWith(secondBackend) { secondPartial = it }
 
@@ -163,11 +181,23 @@ class AudioFileRecorderTest {
         assertTrue(firstPartial.exists())
         assertTrue(secondPartial.exists())
 
-        firstRecorder.stop()
-        val secondFailure = runCatching { secondRecorder.stop() }.exceptionOrNull()
+        val executor = Executors.newFixedThreadPool(2)
+        val results =
+            try {
+                listOf(
+                    executor.submit<Result<RecordedAudio>> { runCatching { firstRecorder.stop() } },
+                    executor.submit<Result<RecordedAudio>> { runCatching { secondRecorder.stop() } },
+                ).map { it.get(10, TimeUnit.SECONDS) }
+            } finally {
+                executor.shutdownNow()
+            }
 
-        assertTrue(output.readBytes().contentEquals(byteArrayOf(1)))
-        assertTrue(secondFailure is AudioRecordingException)
+        assertEquals(1, results.count { it.isSuccess })
+        assertEquals(1, results.count { it.exceptionOrNull() is AudioRecordingException })
+        assertTrue(
+            output.readBytes().let { it.contentEquals(byteArrayOf(1)) || it.contentEquals(byteArrayOf(2)) },
+        )
+        assertFalse(firstPartial.exists())
         assertFalse(secondPartial.exists())
     }
 
