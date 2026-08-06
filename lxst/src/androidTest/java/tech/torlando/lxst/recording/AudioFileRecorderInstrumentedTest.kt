@@ -31,16 +31,18 @@ class AudioFileRecorderInstrumentedTest {
             if (keepArtifact) checkNotNull(context.getExternalFilesDir(null)) else context.cacheDir
         val output = File(outputDirectory, "lxst-recorder-artifact.ogg")
         output.delete()
+        partialFilesFor(output).forEach(File::delete)
         val recorder = AudioFileRecorder(context)
 
         try {
             recorder.start(output)
-            val partial = File(output.parentFile, ".${output.name}.part")
             val deadlineNanos = System.nanoTime() + 15_000_000_000L
-            while (partial.length() < 256L && System.nanoTime() < deadlineNanos) {
+            var partial: File? = null
+            while ((partial == null || partial.length() < 256L) && System.nanoTime() < deadlineNanos) {
+                partial = partialFilesFor(output).singleOrNull()
                 Thread.sleep(50)
             }
-            assertTrue("Recorder did not emit data within 15 seconds", partial.length() >= 256L)
+            assertTrue("Recorder did not emit data within 15 seconds", partial != null && partial.length() >= 256L)
             val result = recorder.stop()
 
             assertTrue(result.file.isFile)
@@ -64,6 +66,13 @@ class AudioFileRecorderInstrumentedTest {
             if (!keepArtifact) {
                 output.delete()
             }
+            partialFilesFor(output).forEach(File::delete)
         }
     }
+
+    private fun partialFilesFor(output: File): List<File> =
+        output.parentFile
+            ?.listFiles { file -> file.name.startsWith(".${output.name}.") && file.name.endsWith(".part") }
+            ?.toList()
+            .orEmpty()
 }
