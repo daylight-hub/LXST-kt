@@ -365,6 +365,66 @@ class Telephone(
 
         // Reconfigure transmit pipeline with new codec
         reconfigureTransmitPipeline()
+
+        // LCS: rebuild the local decoder + native playback engine so THIS side
+        // can hear the peer after it conforms to the new profile.
+        //
+        // switchProfileFromRemote() already does this (upstream v0.0.8 fix).
+        // switchProfile() (local) was missing it: transmit moved, signal went
+        // out, peer conformed — but our own decoder stayed pinned to the old
+        // codec, so we went deaf. Mirrors switchProfileFromRemote exactly.
+        if (useNativeCodec && useNativePlayback) {
+            val decodeParams = profile.nativeDecodeParams()
+            val decodedFrameSamples =
+                decodeParams.sampleRate * profile.frameTimeMs / 1000 * decodeParams.channels
+            val playbackReconfigured =
+                linkSource?.reconfigureNativePlayback(profile.frameTimeMs) { prebufferFrames ->
+                    NativePlaybackEngine.withExclusiveAccess {
+                        val engineCreated = NativePlaybackEngine.create(
+                            sampleRate = decodeParams.sampleRate,
+                            channels = decodeParams.channels,
+                            frameSamples = decodedFrameSamples,
+                            maxBufferFrames = OboeLineSink.MAX_QUEUE_SLOTS,
+                            prebufferFrames = prebufferFrames,
+                        )
+                        if (!engineCreated) {
+                            false
+                        } else {
+                            val decoderConfigured = NativePlaybackEngine.configureDecoder(
+                                codecType = decodeParams.codecType,
+                                sampleRate = decodeParams.sampleRate,
+                                channels = decodeParams.channels,
+                                opusApp = decodeParams.opusApplication,
+                                opusBitrate = decodeParams.opusBitrate,
+                                opusComplexity = decodeParams.opusComplexity,
+                                codec2Mode = decodeParams.codec2LibraryMode,
+                            )
+                            if (decoderConfigured) {
+                                NativePlaybackEngine.setPlaybackMute(receiveMuted)
+                            }
+                            decoderConfigured
+                        }
+                    }
+                } ?: false
+            if (!playbackReconfigured) {
+                Log.e(TAG, "Local profile switch: failed to reconfigure native playback for ${profile.abbreviation}; ending call")
+                hangup()
+                return
+            }
+            audioOutput?.let { sink ->
+                if (sink.isRunning()) sink.stop()
+                configureAudioOutput(decodeParams.sampleRate, decodeParams.channels)
+            }
+        } else {
+            val decodeCodec = profile.createDecodeCodec()
+            val decodeRate = decodeCodec.preferredSamplerate ?: 48000
+            linkSource?.codec = decodeCodec
+            linkSource?.sampleRate = decodeRate
+            audioOutput?.let { sink ->
+                if (sink.isRunning()) sink.stop()
+                configureAudioOutput(decodeRate, 1)
+            }
+        }
     }
 
     /**
