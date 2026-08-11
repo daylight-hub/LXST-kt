@@ -1025,30 +1025,66 @@ class Telephone(
     private fun reconfigureTransmitNativeCodec(wasMuted: Boolean) {
         val encodeParams = activeProfile.nativeEncodeParams()
 
-        // Stop capture stream
-        audioInput?.stop()
+        // LCS: full teardown + fresh construction, not incremental field
+        // mutation, mirroring the fix already applied on the receive side.
+        //
+        // OboeLineSource bakes samplesPerFrame/frameTimeMs into itself at
+        // CONSTRUCTION time, computed from the codec/frameTimeMs it is built
+        // with (see adjustFrameTime()). Profiles transmit at different rates
+        // -- MQ=24000Hz, HQ=48000Hz, LBW/VLBW/ULBW=8000Hz -- so those baked-in
+        // fields are wrong for any profile other than the one the call
+        // started on, and there is no setter for them.
+        //
+        // The previous implementation only mutated the encoder-facing fields
+        // (nativeEncoderSampleRate etc.) on the EXISTING OboeLineSource and
+        // called start(). But OboeLineSource.start() only calls
+        // NativeCaptureEngine.create() -- which creates the raw Oboe AAudio
+        // capture stream at OboeLineSource.sampleRate/samplesPerFrame -- when
+        // its internal `nativeCreated` flag is still false. That flag was
+        // already true from the call's initial pipeline setup, so start()
+        // skipped stream (re)creation entirely and only reconfigured the
+        // encoder. Net effect: the microphone kept recording at the CALL'S
+        // ORIGINAL profile's rate/frame size for the rest of the call, while
+        // only the encoder was reconfigured to expect the NEW profile's
+        // rate/frame size -- a permanent capture/encode mismatch after any
+        // switch away from the establishment profile. This produced
+        // profile-dependent corruption on the remote end (garbled for a
+        // smaller rate delta, silence for a larger one) while the local
+        // decode path -- unaffected by this bug -- stayed correct, matching
+        // exactly what was observed: Liberty Chat's own audio always sounded
+        // fine, while the peer's audio broke after any switch and only
+        // recovered by returning to the establishment profile.
+        //
+        // The fix: release the old transmit source completely (which resets
+        // nativeCreated and calls NativeCaptureEngine.destroy() -- the full
+        // native engine, not just the encoder) and construct a brand new
+        // OboeLineSource via createAudioInput(), exactly as the initial call
+        // setup does. The fresh instance's samplesPerFrame/frameTimeMs are
+        // correctly derived from the NEW profile, and its first start() call
+        // creates the native capture engine at the right sample rate.
+        // releaseAudioInput() calls stop() internally before tearing down the
+        // native engine, so no separate stop() call is needed here.
+        releaseAudioInput()
 
-        // Destroy old native encoder (cleanup before reconfigure)
-        NativeCaptureEngine.destroyEncoder()
+        audioInput =
+            (createAudioInput(activeProfile, transmitMixerAsSink) as OboeLineSource).apply {
+                useNativeCodec = true
+                packetRouter = networkPacketBridge
+                codecHeaderByte = encodeParams.codecHeaderByte
+                nativeEncoderCodecType = encodeParams.codecType
+                nativeEncoderSampleRate = encodeParams.sampleRate
+                nativeEncoderChannels = encodeParams.channels
+                nativeEncoderOpusApp = encodeParams.opusApplication
+                nativeEncoderOpusBitrate = encodeParams.opusBitrate
+                nativeEncoderOpusComplexity = encodeParams.opusComplexity
+                nativeEncoderCodec2Mode = encodeParams.codec2LibraryMode
+            }
 
-        // Update OboeLineSource encoder params for restart.
-        // OboeLineSource.start() configures the new encoder after the native
-        // engine is confirmed to exist (avoids the nullptr lifecycle bug).
-        (audioInput as? OboeLineSource)?.apply {
-            codecHeaderByte = encodeParams.codecHeaderByte
-            nativeEncoderCodecType = encodeParams.codecType
-            nativeEncoderSampleRate = encodeParams.sampleRate
-            nativeEncoderChannels = encodeParams.channels
-            nativeEncoderOpusApp = encodeParams.opusApplication
-            nativeEncoderOpusBitrate = encodeParams.opusBitrate
-            nativeEncoderOpusComplexity = encodeParams.opusComplexity
-            nativeEncoderCodec2Mode = encodeParams.codec2LibraryMode
-        }
-
-        // Restore mute state (atomic bool persists across configureEncoder)
+        // Restore mute state on the freshly created native engine.
         NativeCaptureEngine.setCaptureMute(wasMuted)
 
-        // Restart capture — start() configures the new encoder
+        // Start the new source — its first start() call creates the native
+        // capture engine (Oboe stream + encoder) at the new profile's rate.
         audioInput?.start()
     }
 
